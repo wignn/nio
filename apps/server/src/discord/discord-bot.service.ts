@@ -1,4 +1,6 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
+import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { promises as fs } from 'fs';
+import * as path from 'path';
 import { Client, Events, GatewayIntentBits, GuildMember, Message, Partials, REST, Routes, SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } from 'discord.js';
 import { AppLogger } from '../logger/logger.service';
 import { DiscordInteractionService } from './discord-interaction.service';
@@ -16,8 +18,14 @@ import { ConversationMemoryService } from '../discord-agent/conversation-memory.
 import { RustAnalyticsClientService } from './rust-analytics-client.service';
 import { DiscordVoiceConnectionService } from './discord-voice-connection.service';
 
+const MAX_DELETE_LOG_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+const DELETE_LOG_MEDIA_DIR = path.resolve(process.cwd(), '.tmp/delete-log-media');
+const DELETE_LOG_MEDIA_TTL_MS = 24 * 60 * 60 * 1000;
+const DELETE_LOG_MEDIA_CLEANUP_MS = 60 * 60 * 1000;
+
 @Injectable()
-export class DiscordBotService implements OnModuleInit {
+export class DiscordBotService implements OnModuleInit, OnModuleDestroy {
+  private mediaCleanupInterval: NodeJS.Timeout | null = null;
   readonly client = new Client({
     intents: [
       GatewayIntentBits.Guilds,
@@ -26,7 +34,7 @@ export class DiscordBotService implements OnModuleInit {
       GatewayIntentBits.MessageContent,
       GatewayIntentBits.GuildVoiceStates,
     ],
-    partials: [Partials.GuildMember],
+    partials: [Partials.GuildMember, Partials.Message, Partials.Channel],
     allowedMentions: { parse: [], users: [], roles: [], repliedUser: false },
   });
 
@@ -49,6 +57,11 @@ export class DiscordBotService implements OnModuleInit {
   ) {}
 
   async onModuleInit() {
+    this.cleanupDeletedMedia().catch((err) => this.logger.error(`Delete media cleanup error: ${err?.message ?? err}`, err?.stack, 'DiscordBot'));
+    this.mediaCleanupInterval = setInterval(() => {
+      this.cleanupDeletedMedia().catch((err) => this.logger.error(`Delete media cleanup error: ${err?.message ?? err}`, err?.stack, 'DiscordBot'));
+    }, DELETE_LOG_MEDIA_CLEANUP_MS);
+
     this.slowmode.setClient(this.client);
     this.boosterRoles.setClient(this.client);
     this.tako.setClient(this.client);
@@ -188,11 +201,34 @@ export class DiscordBotService implements OnModuleInit {
     await this.client.login(token);
   }
 
+  onModuleDestroy() {
+    if (this.mediaCleanupInterval) {
+      clearInterval(this.mediaCleanupInterval);
+      this.mediaCleanupInterval = null;
+    }
+  }
+
   private async handleAgentMessage(message: Message) {
     if (!message.guild) return;
 
-    // Send to Rust Analytics Engine, fallback to local DB on failure/absence
-    const sentToRust = await this.rustAnalytics.ingestMessage({
+    const guildSettings = await this.messageLogs.prisma.guildSettings.findUnique({
+      where: { guildId: message.guild.id },
+      select: { messageDeleteLogChannelId: true },
+    }).catch(() => null);
+    const attachments = await this.buildMessageLogAttachments(message, Boolean(guildSettings?.messageDeleteLogChannelId), message.guild.id);
+
+    await this.messageLogs.logCreate({
+      id: message.id,
+      guildId: message.guild.id,
+      channelId: message.channel.id,
+      authorId: message.author.id,
+      content: message.content || '',
+      attachments,
+      embeds: message.embeds.map((embed) => embed.toJSON()),
+      createdAt: message.createdAt,
+    }).catch(() => null);
+
+    await this.rustAnalytics.ingestMessage({
       messageId: message.id,
       guildId: message.guild.id,
       channelId: message.channel.id,
@@ -200,24 +236,6 @@ export class DiscordBotService implements OnModuleInit {
       content: message.content || '',
       timestampMs: message.createdTimestamp,
     });
-
-    if (!sentToRust) {
-      await this.messageLogs.logCreate({
-        id: message.id,
-        guildId: message.guild.id,
-        channelId: message.channel.id,
-        authorId: message.author.id,
-        content: message.content || '',
-        attachments: message.attachments.map((attachment) => ({
-          id: attachment.id,
-          name: attachment.name,
-          url: attachment.url,
-          contentType: attachment.contentType,
-        })),
-        embeds: message.embeds.map((embed) => embed.toJSON()),
-        createdAt: message.createdAt,
-      }).catch(() => null);
-    }
 
     if (!this.client.user) return;
 
@@ -309,6 +327,99 @@ export class DiscordBotService implements OnModuleInit {
     }
   }
 
+  private async buildMessageLogAttachments(message: Message, cacheFiles: boolean, guildId: string) {
+    const attachments: any[] = [];
+    let remainingCacheBytes = MAX_DELETE_LOG_ATTACHMENT_BYTES;
+
+    for (const attachment of message.attachments.values()) {
+      const logAttachment: any = {
+        id: attachment.id,
+        name: attachment.name,
+        url: attachment.url,
+        contentType: attachment.contentType,
+        size: attachment.size,
+      };
+
+      if (cacheFiles && attachment.url && attachment.size <= remainingCacheBytes) {
+        const res = await fetch(attachment.url).catch(() => null);
+        const contentLength = Number(res?.headers.get('content-length') || attachment.size || '0');
+        if (res?.ok && contentLength > 0 && contentLength <= remainingCacheBytes) {
+          const arrayBuffer = await res.arrayBuffer().catch(() => null);
+          const buffer = arrayBuffer ? Buffer.from(arrayBuffer) : null;
+          if (buffer && buffer.length <= remainingCacheBytes) {
+            const cachedFileName = path.join(guildId, message.id, `${attachment.id}-${this.safeFileName(attachment.name || 'file')}`);
+            const saved = await this.writeDeleteLogMedia(cachedFileName, buffer).catch(() => false);
+            if (saved) {
+              remainingCacheBytes -= buffer.length;
+              logAttachment.cachedFileName = cachedFileName;
+              logAttachment.cachedContentType = attachment.contentType;
+              logAttachment.cachedSize = buffer.length;
+            }
+          }
+        }
+      }
+
+      attachments.push(logAttachment);
+    }
+
+    return attachments;
+  }
+
+  private safeFileName(fileName: string) {
+    return fileName.replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').slice(0, 120) || 'file';
+  }
+
+  private resolveDeleteLogMediaPath(cachedFileName: string) {
+    const filePath = path.resolve(DELETE_LOG_MEDIA_DIR, cachedFileName);
+    return filePath.startsWith(`${DELETE_LOG_MEDIA_DIR}${path.sep}`) ? filePath : null;
+  }
+
+  private async writeDeleteLogMedia(cachedFileName: string, buffer: Buffer) {
+    const filePath = this.resolveDeleteLogMediaPath(cachedFileName);
+    if (!filePath) return false;
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.writeFile(filePath, buffer);
+    return true;
+  }
+
+  private async readDeleteLogMedia(cachedFileName: string) {
+    const filePath = this.resolveDeleteLogMediaPath(cachedFileName);
+    if (!filePath) return null;
+    return fs.readFile(filePath).catch(() => null);
+  }
+
+  private async removeDeleteLogMediaDir(guildId: string, messageId: string) {
+    const dir = this.resolveDeleteLogMediaPath(path.join(guildId, messageId));
+    if (!dir) return;
+    await fs.rm(dir, { recursive: true, force: true }).catch(() => null);
+  }
+
+  private async cleanupDeletedMedia() {
+    const cutoff = Date.now() - DELETE_LOG_MEDIA_TTL_MS;
+    await this.cleanupMediaDir(DELETE_LOG_MEDIA_DIR, cutoff, true);
+  }
+
+  private async cleanupMediaDir(dir: string, cutoff: number, keepRoot = false): Promise<boolean> {
+    const entries = await fs.readdir(dir, { withFileTypes: true }).catch((err: any) => {
+      if (err?.code === 'ENOENT') return [];
+      throw err;
+    });
+
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (await this.cleanupMediaDir(fullPath, cutoff)) await fs.rmdir(fullPath).catch(() => null);
+        continue;
+      }
+
+      const stat = await fs.stat(fullPath).catch(() => null);
+      if (stat && stat.mtimeMs < cutoff) await fs.unlink(fullPath).catch(() => null);
+    }
+
+    const remaining = await fs.readdir(dir).catch(() => []);
+    return !keepRoot && remaining.length === 0;
+  }
+
   private async canUseAgent(message: Message) {
     if (!message.guild) return false;
     const result = await this.agent.canHandle(message.guild.id, message.channel.id, message.author.id).catch(() => ({ allowed: false }));
@@ -340,23 +451,52 @@ export class DiscordBotService implements OnModuleInit {
       const largeAttachments: any[] = [];
 
       for (const att of attachments) {
-        if (!att.url) continue;
+        if (att.cachedFileName) {
+          const buffer = await this.readDeleteLogMedia(att.cachedFileName);
+          if (buffer && buffer.length <= MAX_DELETE_LOG_ATTACHMENT_BYTES) {
+            attachmentBuffers.push({ attachment: buffer, name: att.name || 'file' });
+            continue;
+          }
+          largeAttachments.push(att);
+          continue;
+        }
+
+        if (att.cachedBase64) {
+          const buffer = Buffer.from(att.cachedBase64, 'base64');
+          if (buffer.length <= MAX_DELETE_LOG_ATTACHMENT_BYTES) {
+            attachmentBuffers.push({ attachment: buffer, name: att.name || 'file' });
+            continue;
+          }
+          largeAttachments.push(att);
+          continue;
+        }
+
+        if (!att.url) {
+          largeAttachments.push(att);
+          continue;
+        }
         const res = await fetch(att.url).catch(() => null);
         if (res && res.ok) {
           const contentLength = Number(res.headers.get('content-length') || '0');
-          if (contentLength > 0 && contentLength <= 8 * 1024 * 1024) { // max 8MB
+          if (contentLength > 0 && contentLength <= MAX_DELETE_LOG_ATTACHMENT_BYTES) {
             const buffer = Buffer.from(await res.arrayBuffer());
             attachmentBuffers.push({ attachment: buffer, name: att.name || 'file' });
           } else {
             largeAttachments.push(att);
           }
+        } else {
+          largeAttachments.push(att);
         }
       }
 
       let contentDescription = dbLog.content ? `>>> ${dbLog.content}` : '*No text content*';
       if (largeAttachments.length > 0) {
-        const largeList = largeAttachments.map((att) => `• [${att.name || 'file'}](${att.url}) (File too large to re-upload)`).join('\n');
-        contentDescription += `\n\n**Attachments (Over limit):**\n${largeList}`;
+        const largeList = largeAttachments.map((att) => {
+          const name = att.name || 'file';
+          const label = att.url ? `[${name}](${att.url})` : name;
+          return `• ${label} (File too large or unavailable to re-upload)`;
+        }).join('\n');
+        contentDescription += `\n\n**Attachments (Not re-uploaded):**\n${largeList}`;
       }
 
       const embed = new EmbedBuilder()
@@ -373,7 +513,8 @@ export class DiscordBotService implements OnModuleInit {
       await logChannel.send({
         embeds: [embed],
         files: attachmentBuffers,
-      }).catch((err: any) => this.logger.error(`Failed to send message delete log: ${err.message}`, err.stack, 'DiscordBot'));
+      });
+      await this.removeDeleteLogMediaDir(dbLog.guildId, dbLog.id);
     } catch (err: any) {
       this.logger.error(`Error in handleMessageDelete: ${err.message}`, err.stack, 'DiscordBot');
     }

@@ -14,6 +14,9 @@ describe('DiscordMessageLogService', () => {
       findMany: jest.fn(async () => []),
       deleteMany: jest.fn(async () => ({})),
     },
+    guildSettings: {
+      findUnique: jest.fn(async () => ({ messageDeleteLogChannelId: null })),
+    },
   };
 
   beforeEach(async () => {
@@ -65,6 +68,26 @@ describe('DiscordMessageLogService', () => {
     });
 
     expect(prisma.discordMessageLog.upsert).not.toHaveBeenCalled();
+  });
+
+  it('logs when a Discord delete-log channel is configured', async () => {
+    (mockPrisma as any).discordAgentSettings = {
+      findUnique: jest.fn(async () => ({ enabled: false, excludedChannelIds: [] })),
+    };
+    mockPrisma.guildSettings.findUnique.mockResolvedValueOnce({ messageDeleteLogChannelId: 'log-channel-1' });
+
+    await service.logCreate({
+      id: 'msg-1',
+      guildId: 'guild-1',
+      channelId: 'channel-1',
+      authorId: 'author-1',
+      content: '',
+      attachments: [{ name: 'photo.png' }],
+      embeds: [],
+      createdAt: new Date(),
+    });
+
+    expect(prisma.discordMessageLog.upsert).toHaveBeenCalledTimes(1);
   });
 
   it('updates an existing message content', async () => {
