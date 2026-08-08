@@ -136,6 +136,7 @@ describe('DiscordAgentToolExecutorService', () => {
         { provide: AgentActionProposalService, useValue: mockProposals },
         { provide: DiscordMessageLogService, useValue: mockMessageLogs },
         { provide: DiscordAgentContextService, useValue: mockContext },
+        { provide: require('../plugins/plugin-tool-registry.service').PluginToolRegistryService, useValue: { has: jest.fn(() => false), execute: jest.fn() } },
       ],
     }).compile();
 

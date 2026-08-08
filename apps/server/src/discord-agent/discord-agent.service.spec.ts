@@ -60,6 +60,7 @@ describe('DiscordAgentService loop', () => {
         { provide: AgentActionProposalService, useValue: mockProposals },
         { provide: AgentActionRendererService, useValue: mockRenderer },
         { provide: ConversationMemoryService, useValue: mockMemory },
+        { provide: require('../plugins/plugin-tool-registry.service').PluginToolRegistryService, useValue: { definitionsForGuild: jest.fn(async () => []) } },
       ],
     }).compile();
 

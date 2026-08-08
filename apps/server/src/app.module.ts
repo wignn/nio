@@ -15,6 +15,7 @@ import { TakoModule } from './tako/tako.module';
 import { DiscordAgentModule } from './discord-agent/discord-agent.module';
 import { LeaderboardModule } from './leaderboard/leaderboard.module';
 import { EmbedTemplateModule } from './embed-templates/embed-template.module';
+import { PluginsModule } from './plugins/plugins.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { EmbedTemplateModule } from './embed-templates/embed-template.module';
     DiscordAgentModule,
     LeaderboardModule,
     EmbedTemplateModule,
+    PluginsModule,
   ],
 })
 export class AppModule {}

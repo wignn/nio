@@ -1,7 +1,9 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import { Client, Events, GatewayIntentBits, GuildMember, Message, Partials, REST, Routes, SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } from 'discord.js';
+import { Client, Events, GatewayIntentBits, GuildMember, Message, Partials, EmbedBuilder } from 'discord.js';
+import { GuildCommandSyncService } from '../plugins/guild-command-sync.service';
+import { PluginEventDispatcherService } from '../plugins/plugin-event-dispatcher.service';
 import { AppLogger } from '../logger/logger.service';
 import { DiscordInteractionService } from './discord-interaction.service';
 import { StickersService } from '../stickers/stickers.service';
@@ -54,6 +56,8 @@ export class DiscordBotService implements OnModuleInit, OnModuleDestroy {
     private readonly conversationMemory: ConversationMemoryService,
     private readonly rustAnalytics: RustAnalyticsClientService,
     private readonly voiceConnections: DiscordVoiceConnectionService,
+    private readonly commandSync: GuildCommandSyncService,
+    private readonly pluginEvents: PluginEventDispatcherService,
   ) {}
 
   async onModuleInit() {
@@ -89,6 +93,10 @@ export class DiscordBotService implements OnModuleInit, OnModuleDestroy {
       const newGuildMember = newMember as GuildMember;
       const wasBoosting = this.isBoosting(oldGuildMember);
       const isBoosting = this.isBoosting(newGuildMember);
+
+      this.pluginEvents.onGuildMemberUpdate(oldGuildMember, newGuildMember).catch(
+        (err) => this.logger.error(`Plugin member event error: ${err?.message ?? err}`, err?.stack, 'DiscordBot'),
+      );
       if (wasBoosting === isBoosting) return;
 
       this.boosterRoles.handleBoosterStatusChange(newGuildMember.guild.id, newGuildMember.id, wasBoosting, isBoosting).catch(
@@ -103,6 +111,9 @@ export class DiscordBotService implements OnModuleInit, OnModuleDestroy {
     });
 
     this.client.on('messageCreate', (message) => {
+      this.pluginEvents.onMessageCreate(message).catch(
+        (err) => this.logger.error(`Plugin message event error: ${err?.message ?? err}`, err?.stack, 'DiscordBot'),
+      );
       this.slowmode.handleMessage(message).catch(
         (err) => this.logger.error(`Slowmode service error: ${err?.message ?? err}`, err?.stack, 'DiscordBot'),
       );
@@ -163,42 +174,14 @@ export class DiscordBotService implements OnModuleInit, OnModuleDestroy {
       );
     });
 
-    const commands = [
-      new SlashCommandBuilder().setName('dashboard').setDescription('Open the nio dashboard').toJSON(),
-      new SlashCommandBuilder()
-        .setName('booster-role')
-        .setDescription('Create or edit your custom booster role')
-        .setDMPermission(false)
-        .toJSON(),
-      new SlashCommandBuilder()
-        .setName('donate-role')
-        .setDescription('Get private checkout link to donate and receive your reward role')
-        .setDMPermission(false)
-        .toJSON(),
-      new SlashCommandBuilder()
-        .setName('warn')
-        .setDescription('Issue a warning to a member')
-        .addUserOption(option => option.setName('user').setDescription('The member to warn').setRequired(true))
-        .addStringOption(option => option.setName('reason').setDescription('The reason for warning').setRequired(true))
-        .setDefaultMemberPermissions(PermissionFlagsBits.KickMembers | PermissionFlagsBits.BanMembers | PermissionFlagsBits.Administrator)
-        .setDMPermission(false)
-        .toJSON(),
-      new SlashCommandBuilder()
-        .setName('warnings')
-        .setDescription('List warnings of a member')
-        .addUserOption(option => option.setName('user').setDescription('The member to check').setRequired(true))
-        .toJSON(),
-      new SlashCommandBuilder()
-        .setName('unwarn')
-        .setDescription('Revoke a warning by ID')
-        .addStringOption(option => option.setName('id').setDescription('The warning ID').setRequired(true))
-        .setDefaultMemberPermissions(PermissionFlagsBits.KickMembers | PermissionFlagsBits.BanMembers | PermissionFlagsBits.Administrator)
-        .setDMPermission(false)
-        .toJSON(),
-    ];
-    await new REST({ version: '10' }).setToken(token).put(Routes.applicationCommands(clientId), { body: commands });
-    this.logger.log('Slash commands registered', 'DiscordBot');
     await this.client.login(token);
+    await this.commandSync.reconcileUnavailablePlugins().catch((err) =>
+      this.logger.error(`Plugin reconciliation error: ${err?.message ?? err}`, err?.stack, 'DiscordBot'),
+    );
+    for (const guild of this.client.guilds.cache.values()) {
+      await this.commandSync.sync(guild.id).catch((err) => this.logger.error(`Guild command sync error: ${err?.message ?? err}`, err?.stack, 'DiscordBot'));
+    }
+    this.logger.log('Guild slash commands synchronized', 'DiscordBot');
   }
 
   onModuleDestroy() {

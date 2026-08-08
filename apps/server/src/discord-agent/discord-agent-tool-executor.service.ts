@@ -7,6 +7,7 @@ import { AgentActionProposalService } from './agent-action-proposal.service';
 import { DiscordAgentContextService } from './discord-agent-context.service';
 import { DiscordMessageLogService } from './discord-message-log.service';
 import { AgentActionRecommendation, AgentActionType, AgentSettingsUpdate } from './agent-action.types';
+import { PluginToolRegistryService } from '../plugins/plugin-tool-registry.service';
 
 const MAX_READ_LIMIT = 100;
 const MAX_BATCH_ITEMS = 25;
@@ -59,6 +60,7 @@ export class DiscordAgentToolExecutorService {
     private readonly proposals: AgentActionProposalService,
     private readonly messageLogs: DiscordMessageLogService,
     private readonly contextService: DiscordAgentContextService,
+    private readonly pluginTools: PluginToolRegistryService,
   ) {}
 
   setClient(client: Client) {
@@ -70,6 +72,10 @@ export class DiscordAgentToolExecutorService {
     args: any,
     context: { guildId: string; channelId: string; requestedById: string },
   ): Promise<any> {
+    if (this.pluginTools.has(name)) {
+      return this.pluginTools.execute(name, args, context);
+    }
+
     const discordActionType = DISCORD_ACTION_TOOLS[name];
     if (discordActionType) {
       return this.createDiscordActionProposal(discordActionType, args, context);

@@ -34,6 +34,9 @@ model Guild {
   embedTemplates  EmbedTemplate[]
   userNotes       UserNote[]
   voiceSessions   VoiceSession[]
+  plugins         GuildPlugin[]
+  entitlements    GuildEntitlement[]
+  commandSync     GuildCommandSync?
 }
 
 model GuildSettings {
@@ -404,4 +407,80 @@ model VoiceSession {
   @@index([guildId])
   @@index([userId])
   @@index([joinedAt])
+}
+
+enum PluginType {
+  FREE
+  PREMIUM
+}
+
+enum GuildPluginStatus {
+  INSTALLED
+  DISABLED
+  SUSPENDED
+  UNAVAILABLE
+}
+
+enum EntitlementStatus {
+  ACTIVE
+  EXPIRED
+  REVOKED
+  PENDING
+}
+
+model PluginCatalog {
+  id           String     @id
+  version      String
+  name         String
+  description  String
+  type         PluginType @default(FREE)
+  price        Int?
+  active       Boolean    @default(true)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  guilds       GuildPlugin[]
+  entitlements GuildEntitlement[]
+
+  @@index([active])
+}
+
+model GuildPlugin {
+  guildId     String
+  pluginId    String
+  status      GuildPluginStatus @default(INSTALLED)
+  settings    Json?
+  installedAt DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  guild       Guild @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  plugin      PluginCatalog @relation(fields: [pluginId], references: [id], onDelete: Restrict)
+
+  @@id([guildId, pluginId])
+  @@index([pluginId, status])
+}
+
+model GuildEntitlement {
+  id         String @id @default(cuid())
+  guildId    String
+  pluginId   String
+  provider   String
+  externalId String?
+  status     EntitlementStatus @default(PENDING)
+  startsAt   DateTime?
+  expiresAt  DateTime?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  guild      Guild @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  plugin     PluginCatalog @relation(fields: [pluginId], references: [id], onDelete: Restrict)
+
+  @@index([guildId, pluginId, status])
+  @@unique([provider, externalId])
+}
+
+model GuildCommandSync {
+  guildId      String @id
+  manifestHash String
+  syncedAt     DateTime?
+  lastError    String?
+  updatedAt    DateTime @updatedAt
+  guild        Guild @relation(fields: [guildId], references: [id], onDelete: Cascade)
 }
