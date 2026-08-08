@@ -49,6 +49,26 @@ export type Sticker = {
   createdAt: string;
 };
 
+export type PluginType = 'FREE' | 'PREMIUM';
+export type GuildPluginStatus = 'INSTALLED' | 'DISABLED' | 'SUSPENDED' | 'UNAVAILABLE';
+export type EntitlementStatus = 'ACTIVE' | 'EXPIRED' | 'REVOKED' | 'PENDING';
+
+export type MarketplacePlugin = {
+  id: string;
+  version: string;
+  name: string;
+  description: string;
+  type: PluginType;
+  price: number | null;
+  active: boolean;
+  available: boolean;
+  installed: boolean;
+  installationStatus: GuildPluginStatus | null;
+  entitlementStatus: EntitlementStatus | null;
+  entitlementExpiresAt: string | null;
+  credentialConfigured: boolean;
+};
+
 export type Settings = {
   logChannelId: string | null;
   messageDeleteLogChannelId: string | null;

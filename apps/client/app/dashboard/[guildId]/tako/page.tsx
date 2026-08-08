@@ -279,7 +279,7 @@ export default function TakoDashboardPage({ params }: PageProps) {
           </a>
         </div>
 
-        <DashboardNav guildId={guildId} activeTab="booster-roles" /> {/* Sementera gunakan navigasi list yang sama */}
+        <DashboardNav guildId={guildId} activeTab="tako" />
 
         {error && <div className="notice notice-error mb-6">{error}</div>}
         {success && <div className="notice notice-success mb-6">{success}</div>}

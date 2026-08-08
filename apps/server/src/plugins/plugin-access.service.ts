@@ -20,6 +20,39 @@ export class PluginAccessService {
     }));
   }
 
+  async getMarketplacePlugins(guildId: string) {
+    const [catalog, installations, entitlements] = await Promise.all([
+      this.getAvailablePlugins(),
+      this.prisma.guildPlugin.findMany({ where: { guildId } }),
+      this.prisma.guildEntitlement.findMany({
+        where: { guildId },
+        orderBy: { updatedAt: 'desc' },
+      }),
+    ]);
+
+    const installationByPlugin = new Map(
+      installations.map((installation) => [installation.pluginId, installation]),
+    );
+    const entitlementByPlugin = new Map<string, (typeof entitlements)[number]>();
+    for (const entitlement of entitlements) {
+      if (!entitlementByPlugin.has(entitlement.pluginId)) {
+        entitlementByPlugin.set(entitlement.pluginId, entitlement);
+      }
+    }
+
+    return catalog.map((plugin) => {
+      const installation = installationByPlugin.get(plugin.id);
+      const entitlement = entitlementByPlugin.get(plugin.id);
+      return {
+        ...plugin,
+        installed: installation?.status === GuildPluginStatus.INSTALLED,
+        installationStatus: installation?.status ?? null,
+        entitlementStatus: entitlement?.status ?? null,
+        entitlementExpiresAt: entitlement?.expiresAt ?? null,
+      };
+    });
+  }
+
   async getActivePlugins(guildId: string): Promise<NioPlugin[]> {
     const installations = await this.prisma.guildPlugin.findMany({
       where: { guildId, status: GuildPluginStatus.INSTALLED, plugin: { active: true } },
@@ -62,6 +95,16 @@ export class PluginAccessService {
   }
 
   async setStatus(guildId: string, pluginId: string, status: GuildPluginStatus) {
+    if (status === GuildPluginStatus.INSTALLED) {
+      const plugin = await this.prisma.pluginCatalog.findUnique({ where: { id: pluginId } });
+      if (!plugin || !plugin.active || !this.registry.get(pluginId)) {
+        throw new Error('Plugin is unavailable');
+      }
+      if (plugin.type === PluginType.PREMIUM && !(await this.hasActiveEntitlement(guildId, pluginId))) {
+        throw new Error('Premium entitlement required');
+      }
+    }
+
     return this.prisma.guildPlugin.update({
       where: { guildId_pluginId: { guildId, pluginId } },
       data: { status },
@@ -69,7 +112,10 @@ export class PluginAccessService {
   }
 
   async uninstall(guildId: string, pluginId: string) {
-    return this.prisma.guildPlugin.delete({ where: { guildId_pluginId: { guildId, pluginId } } });
+    return this.prisma.$transaction([
+      this.prisma.guildPlugin.delete({ where: { guildId_pluginId: { guildId, pluginId } } }),
+      this.prisma.guildPluginCredential.deleteMany({ where: { guildId, pluginId } }),
+    ]);
   }
 
   private async hasActiveEntitlement(guildId: string, pluginId: string) {

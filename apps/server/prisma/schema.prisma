@@ -36,6 +36,7 @@ model Guild {
   voiceSessions   VoiceSession[]
   plugins         GuildPlugin[]
   entitlements    GuildEntitlement[]
+  pluginCredentials GuildPluginCredential[]
   commandSync     GuildCommandSync?
 }
 
@@ -440,6 +441,7 @@ model PluginCatalog {
   updatedAt    DateTime   @updatedAt
   guilds       GuildPlugin[]
   entitlements GuildEntitlement[]
+  credentials  GuildPluginCredential[]
 
   @@index([active])
 }
@@ -474,6 +476,20 @@ model GuildEntitlement {
 
   @@index([guildId, pluginId, status])
   @@unique([provider, externalId])
+}
+
+model GuildPluginCredential {
+  id             String   @id @default(cuid())
+  guildId        String
+  pluginId       String
+  encryptedToken String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  guild          Guild         @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  plugin         PluginCatalog @relation(fields: [pluginId], references: [id], onDelete: Cascade)
+
+  @@unique([guildId, pluginId])
+  @@index([pluginId])
 }
 
 model GuildCommandSync {

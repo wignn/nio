@@ -13,6 +13,8 @@ describe('PluginAccessService', () => {
         { pluginId: 'premium', plugin: premium },
       ]) },
       guildEntitlement: { findFirst: jest.fn(async () => ({ status: EntitlementStatus.ACTIVE })) },
+      guildPluginCredential: { deleteMany: jest.fn() },
+      $transaction: jest.fn(async (operations: unknown[]) => operations),
     } as any;
     const registry = { get: jest.fn((id: string) => ({ id })), list: jest.fn() } as any;
     const service = new PluginAccessService(prisma, registry);
@@ -25,6 +27,8 @@ describe('PluginAccessService', () => {
     const prisma = {
       pluginCatalog: { findUnique: jest.fn(async () => premium) },
       guildEntitlement: { findFirst: jest.fn(async () => null) },
+      guildPluginCredential: { deleteMany: jest.fn() },
+      $transaction: jest.fn(async (operations: unknown[]) => operations),
     } as any;
     const registry = { get: jest.fn(() => ({ id: 'premium' })) } as any;
     const service = new PluginAccessService(prisma, registry);

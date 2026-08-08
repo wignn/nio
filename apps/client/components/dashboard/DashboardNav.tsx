@@ -2,39 +2,40 @@
 
 type DashboardNavProps = {
   guildId: string;
-  activeTab: 'panels' | 'analytics' | 'audit-logs' | 'settings' | 'stickers' | 'moderation' | 'booster-roles' | 'leaderboard';
+  activeTab: 'panels' | 'plugins' | 'analytics' | 'audit-logs' | 'settings' | 'stickers' | 'moderation' | 'booster-roles' | 'tako' | 'embed-templates' | 'leaderboard';
 };
 
-export function DashboardNav({ guildId, activeTab }: DashboardNavProps) {
-  const tabs = [
-    { id: 'panels' as const, label: 'Panels', href: `/dashboard/${guildId}` },
-    { id: 'stickers' as const, label: 'Stickers', href: `/dashboard/${guildId}/stickers` },
-    { id: 'moderation' as const, label: 'Moderation', href: `/dashboard/${guildId}/moderation` },
-    { id: 'booster-roles' as const, label: 'Booster Roles', href: `/dashboard/${guildId}/booster-roles` },
-    { id: 'analytics' as const, label: 'Analytics', href: `/dashboard/${guildId}/analytics` },
-    { id: 'leaderboard' as const, label: 'Leaderboard', href: `/leaderboard/${guildId}` },
-    { id: 'audit-logs' as const, label: 'Audit Logs', href: `/dashboard/${guildId}/audit-logs` },
-    { id: 'settings' as const, label: 'Settings', href: `/dashboard/${guildId}/settings` },
-  ];
+const tabs = [
+  ['panels', 'Overview', (guildId: string) => `/dashboard/${guildId}`],
+  ['plugins', 'Plugins', (guildId: string) => `/dashboard/${guildId}/plugins`],
+  ['stickers', 'Stickers', (guildId: string) => `/dashboard/${guildId}/stickers`],
+  ['moderation', 'Moderation', (guildId: string) => `/dashboard/${guildId}/moderation`],
+  ['booster-roles', 'Booster Roles', (guildId: string) => `/dashboard/${guildId}/booster-roles`],
+  ['tako', 'Tako Rewards', (guildId: string) => `/dashboard/${guildId}/tako`],
+  ['embed-templates', 'Embed Studio', (guildId: string) => `/dashboard/${guildId}/embed-templates`],
+  ['analytics', 'Analytics', (guildId: string) => `/dashboard/${guildId}/analytics`],
+  ['leaderboard', 'Leaderboard', (guildId: string) => `/leaderboard/${guildId}`],
+  ['audit-logs', 'Audit Logs', (guildId: string) => `/dashboard/${guildId}/audit-logs`],
+  ['settings', 'Settings', (guildId: string) => `/dashboard/${guildId}/settings`],
+] as const;
 
+export function DashboardNav({ guildId, activeTab }: DashboardNavProps) {
   return (
-    <div className="mb-8 flex gap-2 overflow-x-auto whitespace-nowrap border-b border-[var(--border)] pb-3 lg:hidden">
-      {tabs.map((tab) => {
-        const isActive = tab.id === activeTab;
-        return (
-          <a
-            key={tab.id}
-            href={tab.href}
-            className={`rounded-md px-3 py-2 text-sm font-semibold transition-colors ${
-              isActive
-                ? 'bg-indigo-600 text-white dark:bg-indigo-500'
-                : 'text-[var(--text-secondary)] hover:bg-[var(--panel-strong)] hover:text-[var(--text)]'
-            }`}
-          >
-            {tab.label}
-          </a>
-        );
-      })}
-    </div>
+    <nav className="mb-8 flex gap-2 overflow-x-auto whitespace-nowrap border-b border-[var(--border)] pb-3 lg:hidden" aria-label="Server navigation">
+      {tabs.map(([id, label, href]) => (
+        <a
+          key={id}
+          href={href(guildId)}
+          aria-current={id === activeTab ? 'page' : undefined}
+          className={`rounded-md px-3 py-2 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
+            id === activeTab
+              ? 'bg-indigo-600 text-white dark:bg-indigo-500'
+              : 'text-[var(--text-secondary)] hover:bg-[var(--panel-strong)] hover:text-[var(--text)]'
+          }`}
+        >
+          {label}
+        </a>
+      ))}
+    </nav>
   );
 }

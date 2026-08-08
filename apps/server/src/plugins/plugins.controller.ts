@@ -1,4 +1,11 @@
-import { Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, UseGuards } from '@nestjs/common';
+import { CredentialEncryptionService } from './credential-encryption.service';
+import { KineticHostingService } from './kinetic-hosting/kinetic-hosting.service';
+import { PrismaService } from '../prisma/prisma.service';
+import { PluginRegistryService } from './plugin-registry.service';
+class ConfigureCredentialDto {
+  token!: string;
+}
 import { GuildPluginStatus } from '@prisma/client';
 import { SessionAuthGuard } from '../auth/guards/session-auth.guard';
 import { GuildAccessGuard } from '../guilds/guards/guild-access.guard';
@@ -13,6 +20,10 @@ export class PluginsController {
     private readonly access: PluginAccessService,
     private readonly commandSync: GuildCommandSyncService,
     private readonly logger: AppLogger,
+    private readonly prisma: PrismaService,
+    private readonly encryption: CredentialEncryptionService,
+    private readonly kinetic: KineticHostingService,
+    private readonly registry: PluginRegistryService,
   ) {}
 
   private async syncGuild(guildId: string) {
@@ -38,12 +49,41 @@ export class PluginsController {
 
   @Get()
   async list(@Param('guildId') guildId: string) {
-    const [catalog, installed] = await Promise.all([
-      this.access.getAvailablePlugins(),
-      this.access.getActivePlugins(guildId),
-    ]);
-    const activeIds = new Set(installed.map((plugin) => plugin.id));
-    return catalog.map((plugin) => ({ ...plugin, installed: activeIds.has(plugin.id) }));
+    const plugins = await this.access.getMarketplacePlugins(guildId);
+    const credentials = await this.prisma.guildPluginCredential.findMany({
+      where: { guildId },
+      select: { pluginId: true },
+    });
+    const configured = new Set(credentials.map((credential) => credential.pluginId));
+    return plugins.map((plugin) => ({ ...plugin, credentialConfigured: configured.has(plugin.id) }));
+  }
+
+  @Put(':pluginId/credentials')
+  @UseGuards(GuildAccessGuard)
+  async configureCredentials(
+    @Param('guildId') guildId: string,
+    @Param('pluginId') pluginId: string,
+    @Body() body: ConfigureCredentialDto,
+  ) {
+    if (pluginId !== 'kinetic-hosting' || !this.registry.get(pluginId)) {
+      throw new Error('Plugin credential configuration is unavailable');
+    }
+    const token = typeof body?.token === 'string' ? body.token.trim() : '';
+    if (!token || token.length > 512) throw new Error('Kinetic API key is invalid');
+    await this.kinetic.validateToken(token);
+    await this.prisma.guildPluginCredential.upsert({
+      where: { guildId_pluginId: { guildId, pluginId } },
+      create: { guildId, pluginId, encryptedToken: this.encryption.encrypt(token) },
+      update: { encryptedToken: this.encryption.encrypt(token) },
+    });
+    return { configured: true };
+  }
+
+  @Delete(':pluginId/credentials')
+  @UseGuards(GuildAccessGuard)
+  async removeCredentials(@Param('guildId') guildId: string, @Param('pluginId') pluginId: string) {
+    await this.prisma.guildPluginCredential.deleteMany({ where: { guildId, pluginId } });
+    return { configured: false };
   }
 
   @Post(':pluginId/install')

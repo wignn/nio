@@ -6,32 +6,33 @@ type SidebarProps = {
   guildId?: string;
 };
 
+const guildLinks = [
+  ['Overview', (guildId: string) => `/dashboard/${guildId}`, true],
+  ['Plugins', (guildId: string) => `/dashboard/${guildId}/plugins`, false],
+  ['Stickers', (guildId: string) => `/dashboard/${guildId}/stickers`, false],
+  ['Moderation', (guildId: string) => `/dashboard/${guildId}/moderation`, false],
+  ['Booster Roles', (guildId: string) => `/dashboard/${guildId}/booster-roles`, false],
+  ['Tako Rewards', (guildId: string) => `/dashboard/${guildId}/tako`, false],
+  ['Embed Studio', (guildId: string) => `/dashboard/${guildId}/embed-templates`, false],
+  ['Analytics', (guildId: string) => `/dashboard/${guildId}/analytics`, false],
+  ['Leaderboard', (guildId: string) => `/leaderboard/${guildId}`, false],
+  ['Audit Logs', (guildId: string) => `/dashboard/${guildId}/audit-logs`, false],
+  ['Settings', (guildId: string) => `/dashboard/${guildId}/settings`, false],
+] as const;
+
 export function Sidebar({ guildId }: SidebarProps) {
   const pathname = usePathname();
-  const links = guildId
-    ? [
-        { label: 'Panels', href: `/dashboard/${guildId}`, exact: true },
-        { label: 'Stickers', href: `/dashboard/${guildId}/stickers` },
-        { label: 'Moderation', href: `/dashboard/${guildId}/moderation` },
-        { label: 'Booster Roles', href: `/dashboard/${guildId}/booster-roles` },
-        { label: 'Tako Rewards', href: `/dashboard/${guildId}/tako` },
-        { label: 'Embed Studio', href: `/dashboard/${guildId}/embed-templates` },
-        { label: 'Analytics', href: `/dashboard/${guildId}/analytics` },
-        { label: 'Leaderboard', href: `/leaderboard/${guildId}` },
-        { label: 'Audit Logs', href: `/dashboard/${guildId}/audit-logs` },
-        { label: 'Settings', href: `/dashboard/${guildId}/settings` },
-      ]
-    : [{ label: 'Servers', href: '/dashboard', exact: true }];
+  const links = guildId ? guildLinks.map(([label, getHref, exact]) => ({ label, href: getHref(guildId), exact })) : [{ label: 'Servers', href: '/dashboard', exact: true }];
 
   return (
-    <aside className="hidden min-h-screen w-64 shrink-0 border-r border-[var(--border)] bg-[var(--surface)] backdrop-blur-md px-5 py-6 lg:block">
-      <a href="/dashboard" className="block text-xl font-black tracking-tight text-[var(--text)]">
+    <aside className="hidden min-h-screen w-64 shrink-0 border-r border-[var(--border)] bg-[var(--panel)] px-5 py-6 backdrop-blur-md lg:block">
+      <a href="/dashboard" className="block text-xl font-black tracking-tight text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500">
         nio
       </a>
-      <nav className="mt-8 space-y-1">
+      <nav className="mt-8 space-y-1" aria-label="Dashboard navigation">
         <a
           href="/dashboard"
-          className="mb-4 block rounded-md px-3 py-2 text-sm font-medium text-[var(--muted)] transition-colors hover:bg-[var(--panel-strong)] hover:text-[var(--text)]"
+          className="mb-4 block rounded-md px-3 py-2 text-sm font-medium text-[var(--muted)] transition-colors hover:bg-[var(--panel-strong)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
         >
           All servers
         </a>
@@ -41,7 +42,8 @@ export function Sidebar({ guildId }: SidebarProps) {
             <a
               key={link.href}
               href={link.href}
-              className={`block rounded-md px-3 py-2 text-sm font-semibold transition-colors ${
+              aria-current={isActive ? 'page' : undefined}
+              className={`block rounded-md px-3 py-2 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
                 isActive
                   ? 'bg-indigo-600 text-white dark:bg-indigo-500'
                   : 'text-[var(--text-secondary)] hover:bg-[var(--panel-strong)] hover:text-[var(--text)]'

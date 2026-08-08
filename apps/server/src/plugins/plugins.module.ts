@@ -11,6 +11,7 @@ import { GuildCommandSyncService } from './guild-command-sync.service';
 import { PluginAccessService } from './plugin-access.service';
 import { PluginEntitlementSyncService } from './plugin-entitlement-sync.service';
 import { PluginEventDispatcherService } from './plugin-event-dispatcher.service';
+import { CredentialEncryptionService } from './credential-encryption.service';
 import { PluginRegistryService } from './plugin-registry.service';
 import { PluginToolRegistryService } from './plugin-tool-registry.service';
 import { PluginsController } from './plugins.controller';
@@ -67,6 +68,7 @@ const kineticRegistration = {
     PluginEntitlementSyncService,
     PluginToolRegistryService,
     PluginEventDispatcherService,
+    CredentialEncryptionService,
     kineticRegistration,
   ],
   exports: [
