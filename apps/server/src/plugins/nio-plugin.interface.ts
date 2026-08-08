@@ -1,4 +1,9 @@
-import { ApplicationCommandData, ChatInputCommandInteraction, GuildMember, Message } from 'discord.js';
+import {
+  ChatInputCommandInteraction,
+  GuildMember,
+  Message,
+  RESTPostAPIApplicationCommandsJSONBody,
+} from 'discord.js';
 
 export type NioPluginType = 'FREE' | 'PREMIUM';
 
@@ -19,7 +24,7 @@ export interface NioAgentTool {
 export interface NioCommand {
   readonly name: string;
   readonly pluginId?: string;
-  readonly data: ApplicationCommandData;
+  readonly data: RESTPostAPIApplicationCommandsJSONBody;
   readonly execute: (interaction: ChatInputCommandInteraction) => Promise<void>;
 }
 
